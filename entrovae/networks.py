@@ -28,7 +28,7 @@ class LinearNN(nn.Module):
                 self.layers.append(nn.Linear(hidden_dims[i-1], hidden_dims[i]))
 
         # Weight initialisation.
-        for layer in self.layers():
+        for layer in self.layers:
             nn.init.xavier_normal_(layer.weight)
             if layer.bias.data is not None:
                 nn.init.constant_(layer.bias, 0)

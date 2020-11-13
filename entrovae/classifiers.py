@@ -16,7 +16,7 @@ class MNISTClassificationNet(nn.Module):
         self.fc1 = nn.Linear(9216, 128)
         self.fc2 = nn.Linear(128, 10)
 
-        self.nll = F.nll_loss
+        self.nloglikelihood = F.nll_loss
 
     def forward(self, x):
         # Convolutional layers.
@@ -41,4 +41,4 @@ class MNISTClassificationNet(nn.Module):
     def nll(self, x, y):
         output = self.forward(x)
 
-        return self.nll(output, y), output
+        return self.nloglikelihood(output, y), output

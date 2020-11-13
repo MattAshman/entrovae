@@ -6,7 +6,7 @@ import numpy as np
 from torch.distributions.normal import Normal
 from .networks import LinearNN
 
-__all__ = ['NNGaussian', 'NNBernoulli']
+__all__ = ['NNHomoGaussian', 'NNHeteroGaussian', 'NNBernoulli']
 
 
 class HomoGaussian(nn.Module):
@@ -25,9 +25,9 @@ class HomoGaussian(nn.Module):
 
     def forward(self, mu, x):
         sigma = self.log_sigma.exp().clamp(min=self.min_sigma)
-        px_mu = Normal(mu, sigma)
+        px = Normal(mu, sigma)
 
-        return px_mu.log_prob(x)
+        return px.log_prob(x)
 
     def predict(self, mu):
         sigma = self.log_sigma.exp().clamp(min=self.min_sigma)
@@ -50,9 +50,9 @@ class Bernoulli(nn.Module):
         return torch.sigmoid(f)
 
 
-class NNGaussian(nn.Module):
+class NNHomoGaussian(nn.Module):
     """A fully connected neural network for parameterising a diagonal
-    Gaussian distribution.
+    Gaussian distribution with homoscedastic noise.
     :param in_dim (int): dimension of the input variable.
     :param out_dim (int): dimension of the output variable.
     :param hidden_dims (list, optional): dimensions of hidden layers.
@@ -80,6 +80,46 @@ class NNGaussian(nn.Module):
         mu = self.network(z)
 
         return self.loglikelhood.predict(mu)
+
+
+class NNHeteroGaussian(nn.Module):
+    """A fully connected neural network for parameterising a diagonal
+    Gaussian distribution with heteroscedastic noise.
+    :param in_dim (int): dimension of the input variable.
+    :param out_dim (int): dimension of the output variable.
+    :param hidden_dims (list, optional): dimensions of hidden layers.
+    :param sigma (float, optional): if not None, sets the initial
+    homoscedastic output sigma.
+    :param sigma_grad (bool, optional): whether to train the homoscedastic
+    output sigma.
+    :param min_sigma (float, optional): sets the minimum output sigma.
+    :param nonlinearity (function, optional): non-linearity to apply in
+    between layers.
+    """
+    def __init__(self, in_dim, out_dim, hidden_dims=(64, 64), min_sigma=1e-3,
+                 nonlinearity=F.relu):
+        super().__init__()
+
+        self.out_dim = out_dim
+        self.min_sigma = min_sigma
+        self.network = LinearNN(in_dim, 2 * out_dim, hidden_dims, nonlinearity)
+
+    def forward(self, z, x):
+        output = self.network(z)
+        mu = output[..., :self.out_dim]
+        raw_sigma = output[..., self.out_dim:]
+        sigma = F.softplus(raw_sigma) + self.min_sigma
+        px = Normal(mu, sigma)
+
+        return px.log_prob(x)
+
+    def predict(self, z):
+        output = self.network(z)
+        mu = output[..., :self.out_dim]
+        raw_sigma = output[..., self.out_dim:]
+        sigma = F.softplus(raw_sigma) + self.min_sigma
+
+        return mu, sigma
 
 
 class NNBernoulli(nn.Module):
