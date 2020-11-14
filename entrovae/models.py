@@ -113,7 +113,7 @@ class GMMVAE(nn.Module):
         self.k = k
 
         # Initialise GMM parameters.
-        self.pz_y_mu = nn.Parameter(torch.zeros((k, z_dim)),
+        self.pz_y_mu = nn.Parameter(torch.randn((k, z_dim)),
                                     requires_grad=True)
         self.pz_y_logsigma = nn.Parameter(torch.zeros((k, z_dim)),
                                           requires_grad=True)
@@ -129,16 +129,14 @@ class GMMVAE(nn.Module):
         pzy = torch.zeros_like(pi)
         for k in range(self.k):
             pz_y = Normal(self.pz_y_mu[k, :], self.pz_y_logsigma[k, :].exp())
-            # pzy[k] = gaussian_diagonal_ll(z, self.pz_y_mu[k, :],
-            #                               self.pz_y_logsigma[k, :].exp() ** 2)
-            pzy[k] = pz_y.log_prob(z)
-            pzy[k] += pi[:, k].log()
+            pzy[:, k] = pz_y.log_prob(z).sum(1)
+            pzy[:, k] += pi[:, k].log()
 
         pz = torch.logsumexp(pzy, dim=1)
 
         # Compute the posterior p(y|z) = p(z, y) / p(z)
-        py_z = pzy.exp() / pz
-        py_z = Categorical(py_z)
+        py_z = pzy - pz.unsqueeze(1)
+        py_z = Categorical(py_z.exp())
 
         return py_z
 
@@ -157,17 +155,14 @@ class GMMVAE(nn.Module):
 
             py_z = self.py_z(z, pi)
             kl_y += kl_divergence(py_z, Categorical(pi)).sum()
-            # kl_y += py_z * (py_z / pi).log()
 
-            # (k, z_dim)
-            pz_y = Normal(self.pz_y_mu, self.pz_y_logsigma.exp())
-            kl_z += (py_z.probs * kl_divergence(qz, pz_y).sum(1)).sum()
+            for k in range(self.k):
+                pz_y = Normal(
+                    self.pz_y_mu[k, :].repeat(x.shape[0], 1),
+                    self.pz_y_logsigma[k, :].exp().repeat(x.shape[0], 1))
 
-            # for k in range(self.k):
-            #     pz_y = Normal(
-            #         self.pz_y_mu[k, :], self.pz_y_logsigma[k, :].exp())
-            #     kl_z_k = py_z.probs[:, k] * kl_divergence(qz, pz_y).sum(1)
-            #     kl_z += kl_z_k.sum()
+                kl_z_k = py_z.probs[:, k] * kl_divergence(qz, pz_y).sum(1)
+                kl_z += kl_z_k.sum()
 
         log_px_z /= num_samples
         kl_y /= num_samples
@@ -185,9 +180,7 @@ class GMMVAE(nn.Module):
         y = py.sample((num_samples,))
 
         # Sample p(z|y).
-        pz_y_mu = self.pz_y_mu[y, :]
-        pz_y_sigma = self.pz_y_logsigma[y, :].exp()
-        pz_y = Normal(pz_y_mu, pz_y_sigma)
+        pz_y = Normal(self.pz_y_mu[y, :], self.pz_y_logsigma[y, :].exp())
         z = pz_y.sample()
 
         # Sample p(x|z).
